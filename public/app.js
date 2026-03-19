@@ -27,16 +27,21 @@
 
   function deriveStatus(statusJson) {
     // API returns { ok, status }; openclaw gateway status --json outputs the status object
+    // Structure: service.runtime.{state,status,subState}, rpc.ok, port.status
     const s = statusJson?.status ?? statusJson;
-    const runtimeState = s?.runtimeState || s?.probe?.state || s?.service?.state || '';
-    const probeOk = s?.probe?.ok;
+    const rt = s?.service?.runtime;
+    const runtimeState =
+      rt?.state || rt?.status || rt?.subState ||
+      s?.runtimeState || s?.probe?.state || s?.service?.state || '';
+    const rpcOk = s?.rpc?.ok;
     const loaded = s?.service?.loaded;
+    const portBusy = s?.port?.status === 'busy';
     const normalized = String(runtimeState || '').toLowerCase();
 
-    if (probeOk === true || normalized.includes('run') || normalized.includes('active')) {
+    if (rpcOk === true || portBusy || normalized.includes('run') || normalized.includes('active')) {
       return ['running', 'Running'];
     }
-    if (normalized.includes('stop') || normalized.includes('dead') || normalized.includes('fail') || loaded === false) {
+    if (normalized.includes('stop') || normalized.includes('dead') || normalized.includes('fail') || normalized.includes('inactive') || loaded === false) {
       return ['stopped', 'Stopped'];
     }
     if (normalized.includes('start') || normalized.includes('init') || normalized.includes('restart')) {
