@@ -110,13 +110,25 @@
   }
 
   function formatTime(ts) {
-    if (!ts) return '—';
-    const d = new Date(ts);
-    return d.toLocaleString();
+    if (ts == null || ts === '') return '—';
+    try {
+      const d = new Date(ts);
+      const n = d.getTime();
+      if (!Number.isFinite(n)) return '—';
+      return d.toLocaleString();
+    } catch (_) {
+      return '—';
+    }
   }
 
   function formatCost(v) {
-    return typeof v === 'number' ? '$' + v.toFixed(4) : '$0.00';
+    const n = Number(v);
+    return Number.isFinite(n) ? '$' + n.toFixed(4) : '$0.00';
+  }
+
+  function safeToLocaleString(n) {
+    const val = Number(n);
+    return Number.isFinite(val) ? val.toLocaleString() : '0';
   }
 
   function truncate(text, max) {
@@ -138,21 +150,23 @@
       if (res.status === 401) throw new Error('unauthorized');
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Failed to load tokens');
-      const { summary, runs } = data;
-      tokensTotal.textContent = (summary.totalInput + summary.totalOutput).toLocaleString();
-      tokensInput.textContent = summary.totalInput.toLocaleString();
-      tokensOutput.textContent = summary.totalOutput.toLocaleString();
+      const { summary = {}, runs = [] } = data;
+      const totIn = Number(summary.totalInput) || 0;
+      const totOut = Number(summary.totalOutput) || 0;
+      tokensTotal.textContent = safeToLocaleString(totIn + totOut);
+      tokensInput.textContent = safeToLocaleString(totIn);
+      tokensOutput.textContent = safeToLocaleString(totOut);
       tokensCost.textContent = formatCost(summary.totalCost);
       tokensTbody.innerHTML = runs.length
         ? runs.map((r) => {
             const icon = r.runType === 'user' ? '👤' : '🤖';
             const desc = truncate(r.prompt, 150) || '—';
-            const tok = (r.tokens.input || 0) + (r.tokens.output || 0);
+            const tok = (Number(r.tokens?.input) || 0) + (Number(r.tokens?.output) || 0);
             return `<tr>
               <td>${escapeHtml(formatTime(r.timestamp))}</td>
               <td>${icon}</td>
-              <td class="prompt-cell" title="${escapeHtml(r.prompt || '')}">${escapeHtml(desc)}</td>
-              <td>${tok.toLocaleString()}</td>
+              <td class="prompt-cell" title="${escapeHtml(r.prompt ?? '')}">${escapeHtml(desc)}</td>
+              <td>${safeToLocaleString(tok)}</td>
               <td>${formatCost(r.cost)}</td>
             </tr>`;
           }).join('')

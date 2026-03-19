@@ -72,6 +72,16 @@ function normalizeUsage(raw) {
   return { input: Number(input) || 0, output: Number(output) || 0 };
 }
 
+function parseTimestamp(ts) {
+  if (ts == null || ts === '') return Date.now();
+  try {
+    const n = typeof ts === 'number' ? ts : new Date(ts).getTime();
+    return Number.isFinite(n) ? n : Date.now();
+  } catch (_) {
+    return Date.now();
+  }
+}
+
 function estimateCost(model, usage) {
   const rates = MODEL_PRICING[model] || MODEL_PRICING.default;
   return Number(((usage.input || 0) * rates.input + (usage.output || 0) * rates.output).toFixed(6));
@@ -122,7 +132,7 @@ function parseSessionFile(filePath, info) {
           const prompt = pendingPrompt?.text || '';
           const assistantSummary = extractAssistantSummary(msg.content || []);
           runs.push({
-            timestamp: new Date(data.timestamp || Date.now()).getTime(),
+            timestamp: parseTimestamp(data.timestamp),
             runType,
             prompt: runType === 'user' ? prompt : assistantSummary || info.label || info.channel || 'Internal run',
             channel: info.channel,
@@ -163,7 +173,7 @@ function loadDashboardRuns() {
     const usage = run.tokens || { input: 0, output: 0 };
     const model = run.model || 'gpt-5.1-codex';
     return {
-      timestamp: new Date(run.timestamp || Date.now()).getTime(),
+      timestamp: parseTimestamp(run.timestamp),
       runType: 'user',
       prompt: run.prompt || '',
       channel: run.channel || 'dashboard',
@@ -199,14 +209,14 @@ app.get('/api/tokens', requireAuth, (req, res) => {
     const runs = Array.from(runMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     const summary = runs.reduce(
       (acc, r) => {
-        acc.totalInput += r.tokens.input || 0;
-        acc.totalOutput += r.tokens.output || 0;
-        acc.totalCost += r.cost || 0;
+        acc.totalInput += Number(r.tokens?.input) || 0;
+        acc.totalOutput += Number(r.tokens?.output) || 0;
+        acc.totalCost += Number(r.cost) || 0;
         return acc;
       },
       { totalInput: 0, totalOutput: 0, totalCost: 0 }
     );
-    summary.totalCost = Number(summary.totalCost.toFixed(4));
+    summary.totalCost = Number.isFinite(summary.totalCost) ? Number(summary.totalCost.toFixed(4)) : 0;
     res.json({ ok: true, summary, runs });
   } catch (err) {
     console.error('tokens error:', err);
