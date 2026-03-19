@@ -34,6 +34,10 @@
 
   function deriveStatus(statusJson) {
     const s = statusJson?.status ?? statusJson;
+    const errMsg = s?._error || (s?._parseError ? (s?._error || 'Invalid status') : null);
+    if (errMsg) {
+      return ['unknown', 'Error', errMsg];
+    }
     const rt = s?.service?.runtime;
     const runtimeState =
       rt?.state || rt?.status || rt?.subState ||
@@ -44,21 +48,30 @@
     const normalized = String(runtimeState || '').toLowerCase();
 
     if (rpcOk === true || portBusy || normalized.includes('run') || normalized.includes('active')) {
-      return ['running', 'Running'];
+      return ['running', 'Running', ''];
     }
     if (normalized.includes('stop') || normalized.includes('dead') || normalized.includes('fail') || normalized.includes('inactive') || loaded === false) {
-      return ['stopped', 'Stopped'];
+      return ['stopped', 'Stopped', ''];
     }
     if (normalized.includes('start') || normalized.includes('init') || normalized.includes('restart')) {
-      return ['pending', 'Starting…'];
+      return ['pending', 'Starting…', ''];
     }
-    return ['unknown', runtimeState || 'Unknown'];
+    return ['unknown', runtimeState || 'Unknown', ''];
+  }
+
+  async function parseJsonResponse(res) {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      throw new Error('Invalid response from server');
+    }
   }
 
   async function fetchStatus() {
     const res = await fetch('/api/status', { headers: headers() });
     if (res.status === 401) throw new Error('unauthorized');
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (!data.ok) throw new Error(data.error || 'Failed to get status');
     return data;
   }
@@ -66,9 +79,9 @@
   async function loadStatus() {
     try {
       const data = await fetchStatus();
-      const [state, label] = deriveStatus(data);
+      const [state, label, errHint] = deriveStatus(data);
       setStatus(state, label);
-      hint.textContent = '';
+      hint.textContent = errHint || '';
     } catch (err) {
       if (err.message === 'unauthorized') throw err;
       setStatus('unknown', 'Error');
@@ -80,15 +93,34 @@
     try {
       const res = await fetch(`/api/${action}`, { method: 'POST', headers: headers() });
       if (res.status === 401) throw new Error('unauthorized');
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!data.ok) throw new Error(data.error || 'Action failed');
-      setStatus('pending', action === 'stop' ? 'Stopping…' : 'Restarting…');
+      const pendingLabel = action === 'stop' ? 'Stopping…' : (action === 'start' ? 'Starting…' : 'Restarting…');
+      setStatus('pending', pendingLabel);
       hint.textContent = '';
-      setTimeout(loadStatus, 2000);
+      pollStatusUntilStable();
     } catch (err) {
       if (err.message === 'unauthorized') throw err;
       hint.textContent = err.message;
     }
+  }
+
+  function pollStatusUntilStable() {
+    const maxAttempts = 15;
+    let attempts = 0;
+    function poll() {
+      attempts += 1;
+      loadStatus().then(() => {
+        if (attempts < maxAttempts) {
+          const state = statusIndicator.classList.contains('status-running') ||
+            statusIndicator.classList.contains('status-stopped');
+          if (!state) setTimeout(poll, 2000);
+        }
+      }).catch(() => {
+        if (attempts < maxAttempts) setTimeout(poll, 2000);
+      });
+    }
+    setTimeout(poll, 2000);
   }
 
   function showAuth() {
@@ -112,18 +144,30 @@
   function formatTime(ts) {
     if (ts == null || ts === '') return '—';
     try {
-      const d = new Date(ts);
-      const n = d.getTime();
-      if (!Number.isFinite(n)) return '—';
-      return d.toLocaleString();
+      const n = typeof ts === 'number' ? ts : Number(ts);
+      if (!Number.isFinite(n) || n <= 0) return '—';
+      const d = new Date(n);
+      const t = d.getTime();
+      if (!Number.isFinite(t)) return '—';
+      let s;
+      try {
+        s = d.toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium' });
+      } catch (_) {
+        s = d.toISOString ? d.toISOString() : String(d);
+      }
+      return s && s !== 'Invalid Date' ? s : '—';
     } catch (_) {
       return '—';
     }
   }
 
   function formatCost(v) {
-    const n = Number(v);
-    return Number.isFinite(n) ? '$' + n.toFixed(4) : '$0.00';
+    try {
+      const n = Number(v);
+      return Number.isFinite(n) ? '$' + n.toFixed(4) : '$0.00';
+    } catch (_) {
+      return '$0.00';
+    }
   }
 
   function safeToLocaleString(n) {
@@ -143,14 +187,39 @@
     return div.innerHTML;
   }
 
+  function renderRunRow(r) {
+    try {
+      const icon = r?.runType === 'internal' ? '🤖' : '👤';
+      const desc = truncate(String(r?.prompt ?? ''), 150) || '—';
+      const tok = (Number(r?.tokens?.input) || 0) + (Number(r?.tokens?.output) || 0);
+      const timeStr = formatTime(r?.timestamp);
+      const costStr = formatCost(r?.cost);
+      return `<tr>
+        <td>${escapeHtml(timeStr)}</td>
+        <td>${icon}</td>
+        <td class="prompt-cell" title="${escapeHtml(String(r?.prompt ?? ''))}">${escapeHtml(desc)}</td>
+        <td>${safeToLocaleString(tok)}</td>
+        <td>${costStr}</td>
+      </tr>`;
+    } catch (_) {
+      return '<tr><td colspan="5">—</td></tr>';
+    }
+  }
+
   async function loadTokens() {
     if (!tokensTbody) return;
     try {
       const res = await fetch('/api/tokens', { headers: headers() });
       if (res.status === 401) throw new Error('unauthorized');
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (_) {
+        throw new Error('Invalid response');
+      }
       if (!data.ok) throw new Error(data.error || 'Failed to load tokens');
-      const { summary = {}, runs = [] } = data;
+      const summary = data.summary || {};
+      const runs = Array.isArray(data.runs) ? data.runs : [];
       const totIn = Number(summary.totalInput) || 0;
       const totOut = Number(summary.totalOutput) || 0;
       tokensTotal.textContent = safeToLocaleString(totIn + totOut);
@@ -158,21 +227,10 @@
       tokensOutput.textContent = safeToLocaleString(totOut);
       tokensCost.textContent = formatCost(summary.totalCost);
       tokensTbody.innerHTML = runs.length
-        ? runs.map((r) => {
-            const icon = r.runType === 'user' ? '👤' : '🤖';
-            const desc = truncate(r.prompt, 150) || '—';
-            const tok = (Number(r.tokens?.input) || 0) + (Number(r.tokens?.output) || 0);
-            return `<tr>
-              <td>${escapeHtml(formatTime(r.timestamp))}</td>
-              <td>${icon}</td>
-              <td class="prompt-cell" title="${escapeHtml(r.prompt ?? '')}">${escapeHtml(desc)}</td>
-              <td>${safeToLocaleString(tok)}</td>
-              <td>${formatCost(r.cost)}</td>
-            </tr>`;
-          }).join('')
+        ? runs.map((r) => renderRunRow(r)).join('')
         : '<tr><td colspan="5">No runs yet</td></tr>';
     } catch (err) {
-      tokensTbody.innerHTML = '<tr><td colspan="5">' + (err.message || 'Error loading tokens') + '</td></tr>';
+      tokensTbody.innerHTML = '<tr><td colspan="5">' + escapeHtml(String(err?.message || 'Error loading tokens')) + '</td></tr>';
     }
   }
 

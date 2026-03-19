@@ -73,18 +73,24 @@ function normalizeUsage(raw) {
 }
 
 function parseTimestamp(ts) {
-  if (ts == null || ts === '') return Date.now();
+  if (ts == null || ts === '') return 0;
   try {
-    const n = typeof ts === 'number' ? ts : new Date(ts).getTime();
-    return Number.isFinite(n) ? n : Date.now();
+    if (typeof ts === 'number' && Number.isFinite(ts)) return ts;
+    if (typeof ts === 'object') return 0;
+    const n = Number(ts);
+    if (Number.isFinite(n)) return n;
+    const t = new Date(String(ts)).getTime();
+    return Number.isFinite(t) ? t : 0;
   } catch (_) {
-    return Date.now();
+    return 0;
   }
 }
 
 function estimateCost(model, usage) {
   const rates = MODEL_PRICING[model] || MODEL_PRICING.default;
-  return Number(((usage.input || 0) * rates.input + (usage.output || 0) * rates.output).toFixed(6));
+  const cost = (usage.input || 0) * rates.input + (usage.output || 0) * rates.output;
+  const n = Number(Number(cost).toFixed(6));
+  return Number.isFinite(n) ? n : 0;
 }
 
 function extractText(content) {
@@ -153,65 +159,130 @@ function parseSessionFile(filePath, info) {
 }
 
 function loadSessionRuns() {
-  if (!fs.existsSync(SESSION_STORE_PATH)) return [];
-  const store = loadJson(SESSION_STORE_PATH, {});
-  const runs = [];
-  for (const [key, session] of Object.entries(store || {})) {
-    const filePath = session.sessionFile;
-    if (!filePath || !fs.existsSync(filePath)) continue;
-    const channel = session.deliveryContext?.channel || session.lastChannel || session.origin?.provider || 'unknown';
-    const model = session.model || 'gpt-5.1-codex';
-    const label = session.origin?.label || key;
-    runs.push(...parseSessionFile(filePath, { channel, key, model, label }));
+  try {
+    if (!fs.existsSync(SESSION_STORE_PATH)) return [];
+    const store = loadJson(SESSION_STORE_PATH, {});
+    const runs = [];
+    for (const [key, session] of Object.entries(store || {})) {
+      try {
+        const filePath = session?.sessionFile;
+        if (!filePath || !fs.existsSync(filePath)) continue;
+        const channel = session.deliveryContext?.channel || session.lastChannel || session.origin?.provider || 'unknown';
+        const model = session.model || 'gpt-5.1-codex';
+        const label = session.origin?.label || key;
+        runs.push(...parseSessionFile(filePath, { channel, key, model, label }));
+      } catch (_) {
+        /* skip invalid session */
+      }
+    }
+    return runs;
+  } catch (_) {
+    return [];
   }
-  return runs;
 }
 
 function loadDashboardRuns() {
-  const data = loadJson(TOKENS_PATH, { runs: [] });
-  return (data.runs || []).map((run) => {
-    const usage = run.tokens || { input: 0, output: 0 };
-    const model = run.model || 'gpt-5.1-codex';
-    return {
-      timestamp: parseTimestamp(run.timestamp),
-      runType: 'user',
-      prompt: run.prompt || '',
-      channel: run.channel || 'dashboard',
-      sessionId: run.sessionId || 'dashboard',
-      model,
-      tokens: { input: usage.input || 0, output: usage.output || 0 },
-      cost: estimateCost(model, usage),
-      source: 'dashboard'
-    };
-  });
+  try {
+    const data = loadJson(TOKENS_PATH, { runs: [] });
+    const runs = Array.isArray(data.runs) ? data.runs : [];
+    return runs
+      .map((run) => {
+        try {
+          const usage = normalizeUsage(run?.tokens);
+          const model = run?.model || 'gpt-5.1-codex';
+          const cost = estimateCost(model, usage);
+          return {
+            timestamp: parseTimestamp(run?.timestamp),
+            runType: run?.runType === 'internal' ? 'internal' : 'user',
+            prompt: String(run?.prompt ?? ''),
+            channel: run?.channel || 'dashboard',
+            sessionId: run?.sessionId || 'dashboard',
+            model,
+            tokens: { input: usage.input || 0, output: usage.output || 0 },
+            cost: Number.isFinite(Number(cost)) ? Number(cost) : 0,
+            source: 'dashboard'
+          };
+        } catch (_) {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch (e) {
+    console.error('loadDashboardRuns error:', e.message);
+    return [];
+  }
 }
 
 app.get('/api/status', requireAuth, async (req, res) => {
   try {
     const stdout = await runOpenclaw(['gateway', 'status', '--json']);
-    const status = JSON.parse(stdout);
+    const raw = String(stdout || '').trim();
+    let status;
+    try {
+      status = JSON.parse(raw);
+    } catch (parseErr) {
+      console.error('status JSON parse error:', parseErr.message, 'raw length:', raw.length);
+      return res.json({
+        ok: true,
+        status: { _parseError: true, _error: parseErr.message }
+      });
+    }
+    if (!status || typeof status !== 'object') {
+      return res.json({ ok: true, status: { _parseError: true, _error: 'Invalid status output' } });
+    }
     res.json({ ok: true, status });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.json({
+      ok: true,
+      status: { _error: err.message }
+    });
   }
 });
+
+function safeRun(r) {
+  try {
+    const ts = parseTimestamp(r?.timestamp);
+    const input = Number(r?.tokens?.input);
+    const output = Number(r?.tokens?.output);
+    const cost = Number(r?.cost);
+    return {
+      timestamp: Number.isFinite(ts) ? ts : 0,
+      runType: r?.runType === 'internal' ? 'internal' : 'user',
+      prompt: String(r?.prompt ?? ''),
+      tokens: {
+        input: Number.isFinite(input) ? input : 0,
+        output: Number.isFinite(output) ? output : 0
+      },
+      cost: Number.isFinite(cost) ? cost : 0
+    };
+  } catch (_) {
+    return null;
+  }
+}
 
 app.get('/api/tokens', requireAuth, (req, res) => {
   try {
     const sessionRuns = loadSessionRuns();
     const dashboardRuns = loadDashboardRuns();
     const runMap = new Map();
-    const makeKey = (r) => `${r.sessionId}:${r.timestamp}:${(r.prompt || '').slice(0, 50)}`;
-    for (const r of sessionRuns) runMap.set(makeKey(r), r);
-    for (const r of dashboardRuns) {
-      if (!runMap.has(makeKey(r))) runMap.set(makeKey(r), r);
+    const makeKey = (r) => `${String(r?.sessionId ?? '')}:${parseTimestamp(r?.timestamp)}:${String(r?.prompt ?? '').slice(0, 50)}`;
+    for (const r of sessionRuns) {
+      const key = makeKey(r);
+      if (key) runMap.set(key, r);
     }
-    const runs = Array.from(runMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    for (const r of dashboardRuns) {
+      const key = makeKey(r);
+      if (key && !runMap.has(key)) runMap.set(key, r);
+    }
+    const runs = Array.from(runMap.values())
+      .map(safeRun)
+      .filter(Boolean)
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     const summary = runs.reduce(
       (acc, r) => {
-        acc.totalInput += Number(r.tokens?.input) || 0;
-        acc.totalOutput += Number(r.tokens?.output) || 0;
-        acc.totalCost += Number(r.cost) || 0;
+        acc.totalInput += r.tokens.input || 0;
+        acc.totalOutput += r.tokens.output || 0;
+        acc.totalCost += r.cost || 0;
         return acc;
       },
       { totalInput: 0, totalOutput: 0, totalCost: 0 }
