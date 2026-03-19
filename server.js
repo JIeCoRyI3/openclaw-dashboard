@@ -213,6 +213,7 @@ function loadDashboardRuns() {
   }
 }
 
+// Status: always return JSON (client may receive 5xx/HTML from Cloudflare tunnel)
 app.get('/api/status', requireAuth, async (req, res) => {
   try {
     const stdout = await runOpenclaw(['gateway', 'status', '--json']);
@@ -295,6 +296,7 @@ app.get('/api/tokens', requireAuth, (req, res) => {
   }
 });
 
+// Gateway actions: always return JSON (5xx/HTML may come from Cloudflare when origin unreachable)
 app.post('/api/:action', requireAuth, (req, res, next) => {
   const { action } = req.params;
   const valid = ['start', 'stop', 'restart'];

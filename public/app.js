@@ -59,19 +59,35 @@
     return ['unknown', runtimeState || 'Unknown', ''];
   }
 
+  function isHtmlResponse(text, contentType) {
+    const ct = (contentType || '').toLowerCase();
+    return ct.includes('text/html') || (text && text.trimStart().startsWith('<') && text.includes('</'));
+  }
+
+  function errorFor5xxOrHtml(status, text, contentType) {
+    if (status >= 500) {
+      return `Gateway temporarily unavailable (HTTP ${status}). Try again in a moment.`;
+    }
+    if (status >= 400) {
+      return `Request failed (${status}). Try again.`;
+    }
+    return 'Invalid response from server';
+  }
+
   async function parseJsonResponse(res) {
     const text = await res.text();
-    const ct = (res.headers.get('Content-Type') || '').toLowerCase();
+    const ct = res.headers.get('Content-Type') || '';
     try {
       return JSON.parse(text);
     } catch (_) {
-      if (ct.includes('text/html') || (text.trimStart().startsWith('<') && text.includes('</'))) {
-        const status = res.status;
-        const msg = status >= 500 ? `Server error (${status})` : status >= 400 ? `Request failed (${status})` : 'Invalid response from server';
-        throw new Error(msg);
+      if (isHtmlResponse(text, ct)) {
+        throw new Error(errorFor5xxOrHtml(res.status, text, ct));
       }
       if (!res.ok) {
-        throw new Error(res.statusText || `Request failed (${res.status})`);
+        const msg = res.status >= 500
+          ? `Gateway temporarily unavailable (HTTP ${res.status}). Try again in a moment.`
+          : (res.statusText || `Request failed (${res.status})`);
+        throw new Error(msg);
       }
       throw new Error('Invalid response from server');
     }
@@ -81,8 +97,13 @@
     const res = await fetch('/api/status', { headers: headers() });
     if (res.status === 401) throw new Error('unauthorized');
     if (!res.ok) {
-      const data = await parseJsonResponse(res).catch(() => null);
-      throw new Error(data?.error || res.statusText || `Request failed (${res.status})`);
+      try {
+        const data = await parseJsonResponse(res);
+        throw new Error(data?.error || res.statusText || `Request failed (${res.status})`);
+      } catch (e) {
+        if (e instanceof Error && e.message) throw e;
+        throw new Error(res.statusText || `Request failed (${res.status})`);
+      }
     }
     const data = await parseJsonResponse(res);
     if (!data.ok) throw new Error(data.error || 'Failed to get status');
@@ -108,24 +129,59 @@
   }
 
   async function runAction(action) {
-    try {
-      const res = await fetch(`/api/${action}`, { method: 'POST', headers: headers() });
-      if (res.status === 401) throw new Error('unauthorized');
-      if (!res.ok) {
-        const data = await parseJsonResponse(res).catch(() => null);
-        const msg = data?.error || res.statusText || `Request failed (${res.status})`;
-        throw new Error(msg);
+    const maxRetries = 3;
+    const retryDelays = [1000, 2000, 4000];
+    let lastErr = null;
+
+    const setButtonsDisabled = (disabled) => {
+      controlButtons.forEach((btn) => { btn.disabled = disabled; });
+    };
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          setHint(`Retrying… (${attempt}/${maxRetries})`, false);
+          setButtonsDisabled(true);
+          await new Promise((r) => setTimeout(r, retryDelays[attempt - 1]));
+        }
+        const res = await fetch(`/api/${action}`, { method: 'POST', headers: headers() });
+        if (res.status === 401) throw new Error('unauthorized');
+        if (!res.ok) {
+          try {
+            const data = await parseJsonResponse(res);
+            throw new Error(data?.error || res.statusText || `Request failed (${res.status})`);
+          } catch (e) {
+            if (e instanceof Error && e.message) lastErr = e;
+            else lastErr = new Error(res.statusText || `Request failed (${res.status})`);
+            if (res.status >= 500 && attempt < maxRetries) continue;
+            throw lastErr;
+          }
+        }
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Action failed');
+        const pendingLabel = action === 'stop' ? 'Stopping…' : (action === 'start' ? 'Starting…' : 'Restarting…');
+        setStatus('pending', pendingLabel);
+        setHint('');
+        setButtonsDisabled(false);
+        pollStatusUntilStable();
+        return;
+      } catch (err) {
+        if (err.message === 'unauthorized') {
+          setButtonsDisabled(false);
+          throw err;
+        }
+        lastErr = err;
+        if (err.message && attempt < maxRetries) {
+          const is5xx = /\(5\d{2}\)|Gateway temporarily unavailable/i.test(err.message);
+          if (is5xx) continue;
+        }
+        setButtonsDisabled(false);
+        setHint(err.message, true);
+        return;
       }
-      const data = await parseJsonResponse(res);
-      if (!data.ok) throw new Error(data.error || 'Action failed');
-      const pendingLabel = action === 'stop' ? 'Stopping…' : (action === 'start' ? 'Starting…' : 'Restarting…');
-      setStatus('pending', pendingLabel);
-      setHint('');
-      pollStatusUntilStable();
-    } catch (err) {
-      if (err.message === 'unauthorized') throw err;
-      setHint(err.message, true);
     }
+    setButtonsDisabled(false);
+    setHint(lastErr?.message || 'Action failed', true);
   }
 
   function pollStatusUntilStable() {
@@ -236,9 +292,9 @@
       if (res.status === 401) throw new Error('unauthorized');
       let data;
       try {
-        data = await res.json();
-      } catch (_) {
-        throw new Error('Invalid response');
+        data = await parseJsonResponse(res);
+      } catch (e) {
+        throw e instanceof Error ? e : new Error('Invalid response');
       }
       if (!data.ok) throw new Error(data.error || 'Failed to load tokens');
       const summary = data.summary || {};
