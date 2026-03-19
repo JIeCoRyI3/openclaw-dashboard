@@ -1,0 +1,17 @@
+{
+  "name": "openclaw-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard for managing OpenClaw gateway on Linux",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "tunnel": "cloudflared tunnel --url http://localhost:${PORT:-3142}"
+  },
+  "keywords": ["openclaw", "dashboard", "gateway"],
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

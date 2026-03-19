@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenClaw Dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <div class="auth-panel hidden" id="auth-panel">
+      <h1>OpenClaw Dashboard</h1>
+      <p>Enter password to continue.</p>
+      <form id="auth-form">
+        <input type="password" id="password" placeholder="Password" autocomplete="current-password" />
+        <button type="submit">Unlock</button>
+      </form>
+      <p class="error" id="auth-error"></p>
+    </div>
+
+    <div class="dashboard" id="dashboard">
+      <header>
+        <h1>OpenClaw</h1>
+        <div class="status-indicator" id="status-indicator">
+          <span class="dot"></span>
+          <span id="status-label">—</span>
+        </div>
+      </header>
+
+      <div class="controls">
+        <button data-action="start" id="btn-start">Start</button>
+        <button data-action="restart" id="btn-restart">Restart</button>
+        <button data-action="stop" id="btn-stop">Stop</button>
+      </div>
+
+      <p class="hint" id="hint"></p>
+    </div>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
