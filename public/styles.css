@@ -44,6 +44,10 @@ body {
   font-size: 0.9rem;
 }
 
+.dashboard .hint.hint--error {
+  color: #f85149;
+}
+
 #auth-form {
   display: flex;
   gap: 0.5rem;

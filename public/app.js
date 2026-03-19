@@ -61,9 +61,18 @@
 
   async function parseJsonResponse(res) {
     const text = await res.text();
+    const ct = (res.headers.get('Content-Type') || '').toLowerCase();
     try {
       return JSON.parse(text);
     } catch (_) {
+      if (ct.includes('text/html') || (text.trimStart().startsWith('<') && text.includes('</'))) {
+        const status = res.status;
+        const msg = status >= 500 ? `Server error (${status})` : status >= 400 ? `Request failed (${status})` : 'Invalid response from server';
+        throw new Error(msg);
+      }
+      if (!res.ok) {
+        throw new Error(res.statusText || `Request failed (${res.status})`);
+      }
       throw new Error('Invalid response from server');
     }
   }
@@ -71,6 +80,10 @@
   async function fetchStatus() {
     const res = await fetch('/api/status', { headers: headers() });
     if (res.status === 401) throw new Error('unauthorized');
+    if (!res.ok) {
+      const data = await parseJsonResponse(res).catch(() => null);
+      throw new Error(data?.error || res.statusText || `Request failed (${res.status})`);
+    }
     const data = await parseJsonResponse(res);
     if (!data.ok) throw new Error(data.error || 'Failed to get status');
     return data;
@@ -81,27 +94,37 @@
       const data = await fetchStatus();
       const [state, label, errHint] = deriveStatus(data);
       setStatus(state, label);
-      hint.textContent = errHint || '';
+      setHint(errHint || '', Boolean(errHint));
     } catch (err) {
       if (err.message === 'unauthorized') throw err;
       setStatus('unknown', 'Error');
-      hint.textContent = err.message;
+      setHint(err.message, true);
     }
+  }
+
+  function setHint(msg, isError) {
+    hint.textContent = msg || '';
+    hint.classList.toggle('hint--error', Boolean(isError && msg));
   }
 
   async function runAction(action) {
     try {
       const res = await fetch(`/api/${action}`, { method: 'POST', headers: headers() });
       if (res.status === 401) throw new Error('unauthorized');
+      if (!res.ok) {
+        const data = await parseJsonResponse(res).catch(() => null);
+        const msg = data?.error || res.statusText || `Request failed (${res.status})`;
+        throw new Error(msg);
+      }
       const data = await parseJsonResponse(res);
       if (!data.ok) throw new Error(data.error || 'Action failed');
       const pendingLabel = action === 'stop' ? 'Stopping…' : (action === 'start' ? 'Starting…' : 'Restarting…');
       setStatus('pending', pendingLabel);
-      hint.textContent = '';
+      setHint('');
       pollStatusUntilStable();
     } catch (err) {
       if (err.message === 'unauthorized') throw err;
-      hint.textContent = err.message;
+      setHint(err.message, true);
     }
   }
 
@@ -270,7 +293,7 @@
       } else {
         showDashboard();
         setStatus('unknown', 'Error');
-        hint.textContent = err.message || 'Could not load status';
+        setHint(err.message || 'Could not load status', true);
       }
     }
   }

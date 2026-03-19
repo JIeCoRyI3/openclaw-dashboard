@@ -295,17 +295,18 @@ app.get('/api/tokens', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/:action', requireAuth, async (req, res) => {
+app.post('/api/:action', requireAuth, (req, res, next) => {
   const { action } = req.params;
   const valid = ['start', 'stop', 'restart'];
   if (!valid.includes(action)) {
-    return res.status(400).json({ ok: false, error: 'unknown action' });
+    return res.status(400).set('Content-Type', 'application/json').json({ ok: false, error: 'unknown action' });
   }
   try {
     const pid = runGatewayActionAsync(['gateway', action]);
-    res.json({ ok: true, pid });
+    res.set('Content-Type', 'application/json').json({ ok: true, pid });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('gateway action error:', action, err.message);
+    res.status(500).set('Content-Type', 'application/json').json({ ok: false, error: err.message });
   }
 });
 
@@ -315,6 +316,12 @@ app.get('/api/health', (req, res) => {
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Ensure API errors never return HTML
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  res.status(500).set('Content-Type', 'application/json').json({ ok: false, error: err?.message || 'Internal server error' });
 });
 
 app.listen(PORT, () => {
