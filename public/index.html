@@ -19,7 +19,7 @@
     </div>
 
     <div class="dashboard" id="dashboard">
-      <header>
+      <header class="dashboard-header">
         <h1>OpenClaw</h1>
         <div class="status-indicator" id="status-indicator">
           <span class="dot"></span>
@@ -27,13 +27,52 @@
         </div>
       </header>
 
-      <div class="controls">
-        <button data-action="start" id="btn-start">Start</button>
-        <button data-action="restart" id="btn-restart">Restart</button>
-        <button data-action="stop" id="btn-stop">Stop</button>
+      <div class="tabs">
+        <button class="tab-button active" data-tab="control">Control</button>
+        <button class="tab-button" data-tab="tokens">Token Usage</button>
       </div>
 
-      <p class="hint" id="hint"></p>
+      <section class="tab-content" id="tab-control">
+        <div class="controls">
+          <button data-action="start" id="btn-start">Start</button>
+          <button data-action="restart" id="btn-restart">Restart</button>
+          <button data-action="stop" id="btn-stop">Stop</button>
+        </div>
+        <p class="hint" id="hint"></p>
+      </section>
+
+      <section class="tab-content hidden" id="tab-tokens">
+        <div class="token-summary">
+          <div class="token-card">
+            <span class="token-card-label">Total tokens</span>
+            <span id="tokens-total">0</span>
+          </div>
+          <div class="token-card">
+            <span class="token-card-label">Input</span>
+            <span id="tokens-input">0</span>
+          </div>
+          <div class="token-card">
+            <span class="token-card-label">Output</span>
+            <span id="tokens-output">0</span>
+          </div>
+          <div class="token-card">
+            <span class="token-card-label">Cost (USD)</span>
+            <span id="tokens-cost">$0.00</span>
+          </div>
+        </div>
+        <table class="tokens-table" id="tokens-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Type</th>
+              <th>Prompt / Action</th>
+              <th>Tokens</th>
+              <th>Cost</th>
+            </tr>
+          </thead>
+          <tbody id="tokens-tbody"></tbody>
+        </table>
+      </section>
     </div>
   </div>
   <script src="/app.js"></script>

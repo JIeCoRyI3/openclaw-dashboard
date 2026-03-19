@@ -14,7 +14,7 @@ body {
 }
 
 #app {
-  width: min(420px, 96%);
+  width: min(900px, 96%);
   padding: 2rem;
 }
 
@@ -85,11 +85,113 @@ button {
   margin: 0;
 }
 
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
 header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.5rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid #30363d;
+}
+
+.tab-button {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #8b949e;
+  font: inherit;
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab-button:hover {
+  color: #e6edf3;
+}
+
+.tab-button.active {
+  color: #58a6ff;
+  border-bottom-color: #58a6ff;
+}
+
+.tab-content.hidden {
+  display: none !important;
+}
+
+.token-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.token-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  min-width: 100px;
+}
+
+.token-card-label {
+  font-size: 0.75rem;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.token-card span:last-child {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.tokens-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.tokens-table th,
+.tokens-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #30363d;
+}
+
+.tokens-table th {
+  color: #8b949e;
+  font-weight: 500;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tokens-table tbody tr:hover {
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.prompt-cell {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-indicator {
